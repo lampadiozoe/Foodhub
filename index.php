@@ -146,7 +146,7 @@ function getProductImage($product) {
                     <div class="col-md-3 col-sm-6">
                         <div class="card hover-zoom">
                             <div class="position-relative">
-                                <img src="<?php echo getProductImage($product); ?>" class="dish-img" alt="<?php echo htmlspecialchars($product['name']); ?>" loading="lazy" onerror="this.src='https://via.placeholder.com/800x600.png?text=FoodHub+Image';" />
+                                <img src="<?php echo getProductImage($product); ?>" class="dish-img" alt="<?php echo htmlspecialchars($product['name']); ?>" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22800%22 height=%22600%22%3E%3Crect fill=%22%23f0f0f0%22 width=%22800%22 height=%22600%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-family=%22Arial%22 font-size=%2220%22 fill=%22%23999%22%3EFoodHub%3C/text%3E%3C/svg%3E';" />
                                 <span class="badge sale-tag"><?php echo htmlspecialchars($product['stock'] > 5 ? 'Pinoy Favorite' : 'Best Seller'); ?></span>
                                 <button class="btn btn-sm favorite-btn position-absolute top-0 end-0 m-2" data-product-id="<?php echo $product['id']; ?>" data-product-name="<?php echo htmlspecialchars($product['name']); ?>">
                                     <i class="bi bi-heart"></i>
@@ -177,7 +177,7 @@ function getProductImage($product) {
                                 <div class="card h-100 hover-zoom">
                                     <div class="row g-0">
                                         <div class="col-4">
-                                            <img src="<?php echo getProductImage($meal); ?>" class="img-fluid rounded-start h-100 object-fit-cover" alt="<?php echo htmlspecialchars($meal['name']); ?>" loading="lazy" onerror="this.src='https://via.placeholder.com/400x300.png?text=FoodHub+Image';" />
+                                            <img src="<?php echo getProductImage($meal); ?>" class="img-fluid rounded-start h-100 object-fit-cover" alt="<?php echo htmlspecialchars($meal['name']); ?>" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22300%22%3E%3Crect fill=%22%23f0f0f0%22 width=%22400%22 height=%22300%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-family=%22Arial%22 font-size=%2216%22 fill=%22%23999%22%3EFoodHub%3C/text%3E%3C/svg%3E';" />
                                         </div>
                                         <div class="col-8">
                                             <div class="card-body">
@@ -207,7 +207,7 @@ function getProductImage($product) {
                             <div class="col-12">
                                 <div class="card hover-zoom">
                                     <div class="position-relative">
-                                        <img src="<?php echo getProductImage($dessert); ?>" class="card-img-top" alt="<?php echo htmlspecialchars($dessert['name']); ?>" loading="lazy" onerror="this.src='https://via.placeholder.com/400x300.png?text=FoodHub+Image';" />
+                                        <img src="<?php echo getProductImage($dessert); ?>" class="card-img-top" alt="<?php echo htmlspecialchars($dessert['name']); ?>" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22300%22%3E%3Crect fill=%22%23f0f0f0%22 width=%22400%22 height=%22300%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-family=%22Arial%22 font-size=%2216%22 fill=%22%23999%22%3EFoodHub%3C/text%3E%3C/svg%3E';" />
                                         <button class="btn btn-sm favorite-btn position-absolute top-0 end-0 m-2" data-product-id="<?php echo $dessert['id']; ?>" data-product-name="<?php echo htmlspecialchars($dessert['name']); ?>">
                                             <i class="bi bi-heart"></i>
                                         </button>

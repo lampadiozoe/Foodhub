@@ -12,19 +12,18 @@ if (!$receipt) {
 }
 
 // Get latest order status
-$conn = new mysqli("localhost", "root", "", "foodhub");
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+include '../../config/db.php';
+
 $stmt = $conn->prepare("SELECT status FROM orders WHERE id = ?");
 $stmt->bind_param("i", $receipt['order_id']);
 $stmt->execute();
 $result = $stmt->get_result();
 if ($row = $result->fetch_assoc()) {
     $receipt['status'] = $row['status'];
+} else {
+    $receipt['status'] = 'pending';
 }
 $stmt->close();
-$conn->close();
 
 // Optionally one-time display
 unset($_SESSION['receipt']);

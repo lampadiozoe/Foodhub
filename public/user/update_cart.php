@@ -1,6 +1,6 @@
 <?php
 session_start();
-require_once '../../config/db.php';
+include '../../config/db.php';
 
 header('Content-Type: application/json');
 
@@ -19,34 +19,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    $user_id = $_SESSION['user_id'];
+    $product_id = (int)$product_id;
+    $quantity = (int)$quantity;
+
     try {
         if ($quantity == 0) {
             // Remove item from cart
-            unset($_SESSION['cart'][$product_id]);
+            $stmt = $conn->prepare("DELETE FROM cart WHERE user_id = ? AND product_id = ?");
+            $stmt->bind_param("ii", $user_id, $product_id);
+            $stmt->execute();
+            $stmt->close();
         } else {
-            // Update quantity
-            if (!isset($_SESSION['cart'])) {
-                $_SESSION['cart'] = [];
+            // Validate product exists
+            $stmt = $conn->prepare("SELECT stock FROM products WHERE id = ?");
+            $stmt->bind_param("i", $product_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if (!$result->fetch_assoc()) {
+                echo json_encode(['success' => false, 'message' => 'Product not found']);
+                exit;
             }
-            $_SESSION['cart'][$product_id] = $quantity;
+            $stmt->close();
+
+            // Insert or update cart item
+            $stmt = $conn->prepare("INSERT INTO cart (user_id, product_id, quantity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)");
+            $stmt->bind_param("iii", $user_id, $product_id, $quantity);
+            $stmt->execute();
+            $stmt->close();
         }
 
         // Calculate new total and count
         $total = 0;
         $count = 0;
 
-        if (!empty($_SESSION['cart'])) {
-            foreach ($_SESSION['cart'] as $pid => $qty) {
-                $stmt = $pdo->prepare("SELECT price FROM products WHERE id = ?");
-                $stmt->execute([$pid]);
-                $product = $stmt->fetch();
+        $stmt = $conn->prepare("SELECT c.product_id, c.quantity, p.price FROM cart c JOIN products p ON c.product_id = p.id WHERE c.user_id = ?");
+        $stmt->bind_param("i", $user_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
 
-                if ($product) {
-                    $total += $product['price'] * $qty;
-                    $count += $qty;
-                }
-            }
+        while ($row = $result->fetch_assoc()) {
+            $total += $row['price'] * $row['quantity'];
+            $count += $row['quantity'];
         }
+        $stmt->close();
 
         echo json_encode([
             'success' => true,
@@ -56,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
 
     } catch (Exception $e) {
-        echo json_encode(['success' => false, 'message' => 'Database error occurred']);
+        echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
     }
 } else {
     echo json_encode(['success' => false, 'message' => 'Invalid request method']);
