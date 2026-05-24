@@ -5,17 +5,38 @@ include '../config/db.php';
 $errors = [];
 $success = '';
 
+function ensureUserColumns($conn) {
+    $extra = [
+        'phone' => 'VARCHAR(25) NULL',
+        'address' => 'TEXT NULL',
+    ];
+    foreach ($extra as $column => $definition) {
+        $check = $conn->query("SHOW COLUMNS FROM users LIKE '$column'");
+        if ($check && $check->num_rows === 0) {
+            $conn->query("ALTER TABLE users ADD COLUMN $column $definition");
+        }
+    }
+}
+
 if (isset($_POST['register'])) {
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
+    $phone = trim($_POST['phone']);
+    $address = trim($_POST['address']);
     $password = $_POST['password'];
     $confirm_password = $_POST['confirm_password'];
 
-    if (empty($name) || empty($email) || empty($password) || empty($confirm_password)) {
+    if (empty($name) || empty($email) || empty($phone) || empty($address) || empty($password) || empty($confirm_password)) {
         $errors[] = 'All fields are required.';
     }
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = 'Please use a valid email address.';
+    }
+    if (!preg_match('/^[0-9 +()\-]{7,25}$/', $phone)) {
+        $errors[] = 'Please enter a valid phone number.';
+    }
+    if (strlen($address) < 10) {
+        $errors[] = 'Please enter your  full address.';
     }
     if ($password !== $confirm_password) {
         $errors[] = 'Passwords do not match.';
@@ -36,13 +57,14 @@ if (isset($_POST['register'])) {
     }
 
     if (empty($errors)) {
+        ensureUserColumns($conn);
         $hashed = password_hash($password, PASSWORD_DEFAULT);
         $role = 'user';
-        $stmt = $conn->prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)');
-        $stmt->bind_param('ssss', $name, $email, $hashed, $role);
+        $stmt = $conn->prepare('INSERT INTO users (name, email, password, role, phone, address) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('ssssss', $name, $email, $hashed, $role, $phone, $address);
         if ($stmt->execute()) {
             $success = 'Registration successful! You can now <a href="user_login.php">login</a>.';
-            $name = $email = '';
+            $name = $email = $phone = $address = '';
         } else {
             $errors[] = 'Database error: ' . $stmt->error;
         }
@@ -98,12 +120,20 @@ function old($field) {
 
                     <form method="POST">
                         <div class="mb-3">
-                            <label class="form-label">Name <span class="text-danger">*</span></label>
+                            <label class="form-label">Full Name <span class="text-danger">*</span></label>
                             <input type="text" name="name" class="form-control" value="<?php echo old('name'); ?>" required />
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Email <span class="text-danger">*</span></label>
                             <input type="email" name="email" class="form-control" value="<?php echo old('email'); ?>" required />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Phone Number <span class="text-danger">*</span></label>
+                            <input type="tel" name="phone" class="form-control" value="<?php echo old('phone'); ?>" required />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Full Address <span class="text-danger">*</span></label>
+                            <textarea name="address" rows="3" class="form-control" required><?php echo old('address'); ?></textarea>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Password <span class="text-danger">*</span></label>

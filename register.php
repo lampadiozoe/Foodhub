@@ -5,9 +5,24 @@ include 'config/db.php';
 $errors = [];
 $success = '';
 
+function ensureUserColumns($conn) {
+    $extra = [
+        'phone' => 'VARCHAR(25) NULL',
+        'address' => 'TEXT NULL',
+    ];
+    foreach ($extra as $column => $definition) {
+        $check = $conn->query("SHOW COLUMNS FROM users LIKE '$column'");
+        if ($check && $check->num_rows === 0) {
+            $conn->query("ALTER TABLE users ADD COLUMN $column $definition");
+        }
+    }
+}
+
 if (isset($_POST['register'])) {
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
+    $phone = trim($_POST['phone']);
+    $address = trim($_POST['address']);
     $password = $_POST['password'];
     $confirm_password = $_POST['confirm_password'];
 
@@ -17,6 +32,12 @@ if (isset($_POST['register'])) {
     }
     if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = 'Valid email is required.';
+    }
+    if (!preg_match('/^[0-9 +()\-]{7,25}$/', $phone)) {
+        $errors[] = 'Please enter a valid phone number.';
+    }
+    if (strlen($address) < 10) {
+        $errors[] = 'Please enter your address.';
     }
     if (strlen($password) < 6) {
         $errors[] = 'Password must be at least 6 characters.';
@@ -39,10 +60,11 @@ if (isset($_POST['register'])) {
 
     // Insert if no errors
     if (empty($errors)) {
+        ensureUserColumns($conn);
         $hashed_password = password_hash($password, PASSWORD_DEFAULT);
         $role = 'user';
-        $stmt = $conn->prepare("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param("ssss", $name, $email, $hashed_password, $role);
+        $stmt = $conn->prepare("INSERT INTO users (name, email, password, role, phone, address) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("ssssss", $name, $email, $hashed_password, $role, $phone, $address);
         if ($stmt->execute()) {
             $success = 'Registration successful! You can now <a href="public/login.php">login</a>.';
         } else {
@@ -99,12 +121,20 @@ if (isset($_POST['register'])) {
                         <?php endif; ?>
                         <form method="POST">
                             <div class="mb-3">
-                                <label for="name" class="form-label">Name</label>
+                                <label for="name" class="form-label">Full Name</label>
                                 <input type="text" class="form-control" id="name" name="name" required value="<?php echo htmlspecialchars($_POST['name'] ?? ''); ?>">
                             </div>
                             <div class="mb-3">
                                 <label for="email" class="form-label">Email</label>
                                 <input type="email" class="form-control" id="email" name="email" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
+                            </div>
+                            <div class="mb-3">
+                                <label for="phone" class="form-label">Phone Number</label>
+                                <input type="tel" class="form-control" id="phone" name="phone" required value="<?php echo htmlspecialchars($_POST['phone'] ?? ''); ?>">
+                            </div>
+                            <div class="mb-3">
+                                <label for="address" class="form-label">Delivery Address</label>
+                                <textarea class="form-control" id="address" name="address" rows="3" required><?php echo htmlspecialchars($_POST['address'] ?? ''); ?></textarea>
                             </div>
                             <div class="mb-3">
                                 <label for="password" class="form-label">Password</label>

@@ -41,14 +41,14 @@ if (isset($_POST['login'])) {
     <link rel="stylesheet" href="../css/style.css" />
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-danger">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-success">
         <div class="container">
-            <a class="navbar-brand" href="../index.php">FoodHub Admin</a>
+            <a class="navbar-brand" href="admin_login.php">FoodHub Admin</a>
             <div class="navbar-nav ms-auto">
                 <a class="nav-link" href="../index.php">Home</a>
                 <a class="nav-link" href="user_login.php">User Login</a>
                 <a class="nav-link active" href="admin_login.php">Admin Login</a>
-                <span class="badge bg-danger align-self-center">Admin Login</span>
+                <span class="badge bg-success align-self-center">Admin Login</span>
             </div>
         </div>
     </nav>
@@ -70,7 +70,7 @@ if (isset($_POST['login'])) {
                             <label class="form-label">Password</label>
                             <input type="password" name="password" class="form-control" required />
                         </div>
-                        <button type="submit" name="login" class="btn btn-danger w-100">Login as Admin</button>
+                        <button type="submit" name="login" class="btn btn-success w-100">Login as Admin</button>
                     </form>
                     <p class="text-center mt-3 text-muted">Admin accounts are not created through this page.</p>
                 </div>

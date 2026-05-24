@@ -2,6 +2,59 @@
 session_start();
 include '../../config/db.php';
 
+function getUserInitials($name) {
+    $parts = preg_split('/\s+/', trim($name));
+    if (empty($parts)) {
+        return 'U';
+    }
+    $initials = strtoupper(substr($parts[0], 0, 1));
+    if (isset($parts[1])) {
+        $initials .= strtoupper(substr($parts[1], 0, 1));
+    }
+    return $initials;
+}
+
+if (isset($_POST['get_cart'])) {
+    header('Content-Type: application/json');
+    if (!isset($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'message' => 'Please login first']);
+        exit();
+    }
+    $user_id = $_SESSION['user_id'];
+    $stmt = $conn->prepare("SELECT c.product_id,c.quantity,p.id,p.name,p.price,p.image FROM cart c JOIN products p ON c.product_id=p.id WHERE c.user_id=? ORDER BY c.added_at DESC");
+    $stmt->bind_param('i', $user_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $items = []; $total = 0.0; $count = 0;
+    $uploadsDir = realpath(__DIR__.'/../../uploads').DIRECTORY_SEPARATOR;
+    while ($row = $result->fetch_assoc()) {
+        $item = [
+            'product_id' => (int)$row['product_id'],
+            'id'         => (int)$row['id'],
+            'name'       => $row['name'],
+            'price'      => (float)$row['price'],
+            'quantity'   => (int)$row['quantity'],
+        ];
+        $filename = trim($row['image'] ?? '');
+        if (!empty($filename) && filter_var($filename, FILTER_VALIDATE_URL)) {
+            $item['image'] = $filename;
+        } else {
+            $basename = basename($filename);
+            if (!empty($basename) && file_exists($uploadsDir.$basename)) {
+                $item['image'] = '/uploads/'.rawurlencode($basename);
+            } else {
+                $item['image'] = 'data:image/svg+xml,'.rawurlencode('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"><rect fill="#f0f2f5" width="200" height="120"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="Arial" font-size="14" fill="#aaa">FoodHub</text></svg>');
+            }
+        }
+        $items[] = $item;
+        $total  += $item['price'] * $item['quantity'];
+        $count  += $item['quantity'];
+    }
+    $stmt->close();
+    echo json_encode(['success' => true, 'items' => $items, 'total' => $total, 'cart_count' => $count]);
+    exit();
+}
+
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'user') {
     header('Location: ../user_login.php');
     exit();
@@ -12,10 +65,10 @@ $name = $_SESSION['name'];
 // Add to cart
 if (isset($_POST['add_to_cart'])) {
     $product_id = (int)$_POST['product_id'];
-    $stmt = $conn->prepare('SELECT stock FROM products WHERE id = ?');
+    $stmt = $conn->prepare('SELECT stock, low_stock_warning FROM products WHERE id = ?');
     $stmt->bind_param('i', $product_id);
     $stmt->execute();
-    $stmt->bind_result($stock);
+    $stmt->bind_result($stock, $lowStockWarning);
     $stmt->fetch();
     $stmt->close();
 
@@ -26,8 +79,24 @@ if (isset($_POST['add_to_cart'])) {
         $stmt->execute();
         $stmt->close();
         $_SESSION['message'] = 'Item added to cart! 🛒';
+        // If AJAX request, return JSON with updated cart count
+        $isAjax = false;
+        if ((isset($_POST['ajax']) && $_POST['ajax'] == '1') || (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest')) {
+            $isAjax = true;
+        }
+        if ($isAjax) {
+            $stmt = $conn->prepare('SELECT COALESCE(SUM(quantity),0) as cnt FROM cart WHERE user_id=?');
+            $stmt->bind_param('i', $user_id);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            $cnt = $res->fetch_assoc()['cnt'] ?? 0;
+            $stmt->close();
+            header('Content-Type: application/json');
+            echo json_encode(['success' => true, 'message' => $_SESSION['message'], 'cart_count' => (int)$cnt]);
+            exit;
+        }
     } else {
-        $_SESSION['message'] = 'Out of stock, please pick another item.';
+        $_SESSION['message'] = 'This item is currently unavailable.';
     }
     header('Location: dashboard.php#menu');
     exit();
@@ -49,7 +118,7 @@ if (isset($_POST['remove_from_cart'])) {
 $checkoutError = '';
 if (isset($_POST['checkout'])) {
     $user_id = $_SESSION['user_id'];
-    $stmt = $conn->prepare("SELECT c.product_id,c.quantity,p.price,p.stock,p.name FROM cart c JOIN products p ON c.product_id=p.id WHERE c.user_id=?");
+    $stmt = $conn->prepare("SELECT c.product_id,c.quantity,p.price,p.stock,p.low_stock_warning,p.name FROM cart c JOIN products p ON c.product_id=p.id WHERE c.user_id=?");
     $stmt->bind_param('i', $user_id);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -65,7 +134,7 @@ if (isset($_POST['checkout'])) {
 
     if ($checkoutError === '') {
         foreach ($cart_items as $item) {
-            if ($item['stock'] < $item['quantity']) { $checkoutError = 'Insufficient stock for '.$item['name']; break; }
+            if ($item['stock'] <= 0) { $checkoutError = 'Sorry, '.$item['name'].' is no longer available.'; break; }
         }
     }
 
@@ -84,9 +153,6 @@ if (isset($_POST['checkout'])) {
             $receipt_items[] = ['product'=>['id'=>$item['product_id'],'name'=>$item['name'],'price'=>$item['price']],'qty'=>$item['quantity'],'item_total'=>$item_total];
             $stmt = $conn->prepare('INSERT INTO order_items (order_id,product_id,quantity,price) VALUES (?,?,?,?)');
             $stmt->bind_param('iiid', $order_id, $item['product_id'], $item['quantity'], $item['price']);
-            $stmt->execute(); $stmt->close();
-            $stmt = $conn->prepare('UPDATE products SET stock=stock-? WHERE id=?');
-            $stmt->bind_param('ii', $item['quantity'], $item['product_id']);
             $stmt->execute(); $stmt->close();
         }
         $_SESSION['receipt'] = ['order_id'=>$order_id,'username'=>$name,'items'=>$receipt_items,'total'=>$total,'cash_given'=>$cashAmount,'change'=>$changeAmount,'order_time'=>date('Y-m-d H:i:s'),'status'=>'pending'];
@@ -134,7 +200,7 @@ function getProductImage($product) {
     $filename   = trim($product['image'] ?? '');
     if (!empty($filename) && filter_var($filename, FILTER_VALIDATE_URL)) return $filename;
     $basename = basename($filename);
-    if (!empty($basename) && file_exists($uploadsDir.$basename)) return '../../uploads/'.rawurlencode($basename);
+    if (!empty($basename) && file_exists($uploadsDir.$basename)) return '/uploads/'.rawurlencode($basename);
     $fallback = [
         'Chicken Adobo'     => 'https://images.unsplash.com/photo-1599785209707-4dda1b54d0c5?auto=format&fit=crop&w=600&q=80',
         'Pork Sinigang'     => 'https://images.unsplash.com/photo-1576134026800-5d0c0dd7e157?auto=format&fit=crop&w=600&q=80',
@@ -166,6 +232,37 @@ $cartCount = 0; foreach ($cart_items as $ci) $cartCount += $ci['qty'];
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>FoodHub — Order Now</title>
+  <script>
+    if (typeof window.showToast !== 'function') {
+      window.showToast = function(message, type = 'info') {
+        try {
+          let container = document.getElementById('toastContainer');
+          if (!container) {
+            container = document.createElement('div');
+            container.id = 'toastContainer';
+            container.className = 'toast-container position-fixed top-0 end-0 p-3';
+            container.style.zIndex = '9999';
+            document.body.appendChild(container);
+          }
+          const icons = {success:'check-circle', danger:'exclamation-triangle', info:'info-circle', warning:'exclamation-circle'};
+          const toast = document.createElement('div');
+          toast.className = `toast align-items-center text-white bg-${type} border-0`;
+          toast.setAttribute('role', 'alert');
+          toast.innerHTML = `<div class="d-flex"><div class="toast-body"><i class="bi bi-${icons[type]||'info-circle'} me-2"></i>${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+          container.appendChild(toast);
+          if (window.bootstrap && typeof bootstrap.Toast === 'function') {
+            new bootstrap.Toast(toast, {autohide: true, delay: 3000}).show();
+          } else {
+            setTimeout(() => toast.remove(), 3000);
+          }
+          toast.addEventListener('hidden.bs.toast', () => toast.remove());
+        } catch (e) {
+          console.warn('showToast fallback error', e);
+          alert(message);
+        }
+      };
+    }
+  </script>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css"/>
@@ -230,6 +327,36 @@ $cartCount = 0; foreach ($cart_items as $ci) $cartCount += $ci['qty'];
       position: absolute; left: 1rem; top: 50%; transform: translateY(-50%);
       color: var(--muted); pointer-events: none;
     }
+    .profile-pill {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+    }
+    .profile-pill .profile-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,.18);
+      color: #fff;
+      font-weight: 700;
+      font-size: .9rem;
+      text-transform: uppercase;
+    }
+    .profile-pill .profile-name {
+      color: rgba(255,255,255,.95);
+      font-size: .9rem;
+      font-weight: 600;
+      max-width: 120px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .profile-pill .dropdown-menu {
+      min-width: 220px;
+    }
   </style>
 </head>
 <body>
@@ -246,11 +373,19 @@ $cartCount = 0; foreach ($cart_items as $ci) $cartCount += $ci['qty'];
     </button>
     <div class="collapse navbar-collapse justify-content-end" id="navbarUser">
       <div class="navbar-nav align-items-center gap-1">
-        <span class="navbar-text me-2" style="font-size:.875rem;color:rgba(255,255,255,.7)">
-          <i class="bi bi-person-circle me-1"></i><?=htmlspecialchars($name)?>
-        </span>
+        <div class="dropdown profile-pill me-2">
+          <button class="btn btn-sm btn-outline-light dropdown-toggle d-flex align-items-center gap-2" type="button" id="profileDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+            <span class="profile-avatar"><?=htmlspecialchars(getUserInitials($name))?></span>
+            <span class="profile-name"><?=htmlspecialchars($name)?></span>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="profileDropdown">
+            <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>View Profile</a></li>
+            <li><a class="dropdown-item" href="#menu"><i class="bi bi-list-task me-2"></i>Menu</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item text-danger" href="../../logout.php"><i class="bi bi-box-arrow-right me-2"></i>Logout</a></li>
+          </ul>
+        </div>
         <a class="nav-link" href="#menu">🍛 Menu</a>
-        <a class="nav-link" href="../../logout.php"><i class="bi bi-box-arrow-right"></i> Logout</a>
       </div>
     </div>
   </div>
@@ -388,13 +523,12 @@ $cartCount = 0; foreach ($cart_items as $ci) $cartCount += $ci['qty'];
       <div class="products-grid stagger">
         <?php foreach ($items as $p):
           $outOfStock  = $p['stock'] <= 0;
-          $lowStock    = !$outOfStock && $p['stock'] <= 5;
+          $lowStock    = !$outOfStock && !empty($p['low_stock_warning']);
           $imgSrc      = htmlspecialchars($getImg($p));
           $pName       = addslashes(htmlspecialchars($p['name']));
           $pDesc       = addslashes(htmlspecialchars($p['description'] ?? 'Authentic Filipino dish, freshly prepared.'));
           $pPrice      = number_format($p['price'], 2);
           $pId         = (int)$p['id'];
-          $pStock      = (int)$p['stock'];
           if ($pDesc === '') $pDesc = 'Authentic Filipino dish, freshly prepared.';
         ?>
         <div class="dish-card menu-item"
@@ -403,9 +537,11 @@ $cartCount = 0; foreach ($cart_items as $ci) $cartCount += $ci['qty'];
              data-pid="<?=$pId?>">
 
           <?php if ($outOfStock): ?>
-            <span class="stock-badge out">Out of Stock</span>
+            <span class="stock-badge out">Unavailable</span>
           <?php elseif ($lowStock): ?>
-            <span class="stock-badge low">Only <?=$pStock?> left</span>
+            <span class="stock-badge low">Almost Out</span>
+          <?php else: ?>
+            <span class="stock-badge in">Available</span>
           <?php endif; ?>
 
           <!-- Thumbnail — click = full lightbox -->
@@ -423,17 +559,17 @@ $cartCount = 0; foreach ($cart_items as $ci) $cartCount += $ci['qty'];
 
           <!-- Add to cart + fav buttons -->
           <div class="dish-card-footer">
-            <form method="POST" style="flex:1;display:contents">
+            <form method="POST" style="display:flex;flex:1;">
               <input type="hidden" name="product_id" value="<?=$pId?>"/>
               <?php if (!$outOfStock): ?>
-                <button type="submit" name="add_to_cart" class="btn-add" onclick="event.stopPropagation()">
+                <button type="submit" name="add_to_cart" class="btn btn-primary btn-sm btn-add" onclick="event.stopPropagation()">
                   <i class="bi bi-cart-plus"></i> Add
                 </button>
               <?php else: ?>
-                <button class="btn-add" disabled><i class="bi bi-x-circle"></i> Unavailable</button>
+                <button class="btn btn-secondary btn-sm btn-add" disabled><i class="bi bi-x-circle"></i> Unavailable</button>
               <?php endif; ?>
             </form>
-            <button class="fav-btn-sm" title="Favourite"
+            <button type="button" class="fav-btn-sm" title="Favourite"
                     data-pid="<?=$pId?>"
                     onclick="event.stopPropagation(); toggleFavorite(<?=$pId?>, this)">
               <i class="bi bi-heart-fill"></i>
@@ -449,20 +585,20 @@ $cartCount = 0; foreach ($cart_items as $ci) $cartCount += $ci['qty'];
               <div class="hover-preview-price">₱<?=$pPrice?></div>
               <p class="hover-preview-desc"><?=htmlspecialchars($p['description'] ?? 'Authentic Filipino dish, freshly prepared.')?></p>
               <span class="hover-preview-stock <?=$outOfStock?'out':($lowStock?'low':'in')?>">
-                <?=$outOfStock ? 'Out of Stock' : ($lowStock ? "Only {$pStock} left" : "In Stock ({$pStock})")?>
+                <?=$outOfStock ? 'Unavailable' : ($lowStock ? 'Almost Out' : 'Available')?>
               </span>
               <div class="hover-preview-actions">
                 <?php if (!$outOfStock): ?>
-                <form method="POST" style="flex:1;display:contents">
+                <form method="POST" style="display:flex;flex:1;">
                   <input type="hidden" name="product_id" value="<?=$pId?>"/>
-                  <button type="submit" name="add_to_cart" class="btn-hp-add">
+                  <button type="submit" name="add_to_cart" class="btn btn-primary btn-sm btn-hp-add">
                     <i class="bi bi-cart-plus"></i> Add to Cart
                   </button>
                 </form>
                 <?php else: ?>
-                  <button class="btn-hp-add" disabled style="flex:1"><i class="bi bi-x-circle"></i> Unavailable</button>
+                  <button class="btn btn-secondary btn-sm btn-hp-add" disabled style="flex:1"><i class="bi bi-x-circle"></i> Unavailable</button>
                 <?php endif; ?>
-                <button class="btn-hp-fav"
+                <button type="button" class="btn-hp-fav"
                         data-pid="<?=$pId?>"
                         onclick="syncFav(<?=$pId?>, this)"
                         title="Favourite">
@@ -497,7 +633,9 @@ $cartCount = 0; foreach ($cart_items as $ci) $cartCount += $ci['qty'];
 </div><!-- /.page-wrapper -->
 
 <!-- ── FLOATING CART BUTTON ── -->
-<button class="floating-cart-btn" onclick="openCartModal()" id="cartButton">
+<button class="floating-cart-btn" onclick="openCartModal()" id="cartButton"
+        style="position:fixed;bottom:2rem;right:2rem;
+               z-index:9999;pointer-events:all;">
   <i class="bi bi-cart3"></i>
   <span class="cart-counter" id="cartCounter" <?=$cartCount==0?'style="display:none"':''?>><?=$cartCount?></span>
 </button>
@@ -627,18 +765,17 @@ $cartCount = 0; foreach ($cart_items as $ci) $cartCount += $ci['qty'];
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 // ── Image lightbox popup ──────────────────────────────────────────────────────
-function showImgPopup(src, name, price, desc, productId, outOfStock) {
+function showImgPopup(src, name, price, desc, productId = '', outOfStock = false) {
   document.getElementById('popupImg').src  = src;
   document.getElementById('popupName').textContent  = name;
-  document.getElementById('popupPrice').textContent = price
-    ? '₱' + parseFloat(price).toLocaleString('en-PH', {minimumFractionDigits:2}) : '';
+  document.getElementById('popupPrice').textContent = price ? '₱' + parseFloat(price).toLocaleString('en-PH', {minimumFractionDigits:2}) : '';
   document.getElementById('popupDesc').textContent  = desc || '';
-  document.getElementById('popupProductId').value   = productId || '';
+  document.getElementById('popupProductId').value   = productId;
 
   const btn = document.getElementById('popupAddBtn');
   if (outOfStock) {
     btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Out of Stock';
+    btn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Unavailable';
     btn.className = 'btn btn-secondary btn-sm';
   } else {
     btn.disabled = false;
@@ -657,18 +794,122 @@ function closeImgPopup(e, force) {
   }
 }
 
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeImgPopup(null, true); });
+// ── Cart Functions ────────────────────────────────────────────────────────────
+async function fetchCartAndRender() {
+  const body = document.getElementById('cartModalBody');
+  if (!body) return;
 
-// ── Cart modal ────────────────────────────────────────────────────────────────
-function openCartModal() { new bootstrap.Modal(document.getElementById('cartModal')).show(); }
+  body.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div></div>';
 
-function proceedToCheckout() {
-  bootstrap.Modal.getInstance(document.getElementById('cartModal'))?.hide();
-  setTimeout(() => new bootstrap.Modal(document.getElementById('checkoutModal')).show(), 300);
+  try {
+    const fd = new FormData();
+    fd.append('get_cart', '1');
+
+    const resp = await fetch(window.location.href, { 
+      method: 'POST', 
+      body: fd 
+    });
+
+    const text = await resp.text();
+    let data;
+
+    try { 
+      data = JSON.parse(text); 
+    } catch(e) {
+      console.error('Non-JSON from server:', text.slice(0,300));
+      body.innerHTML = '<div class="text-center py-4 text-danger">Session may have expired. <a href="user_login.php">Log in again</a>.</div>';
+      return;
+    }
+
+    if (!data.success) {
+      body.innerHTML = '<div class="text-center py-4 text-danger">'+(data.message||'Failed to load cart')+'</div>';
+      return;
+    }
+
+    const items = data.items || [];
+    if (!items.length) {
+      body.innerHTML = `<div class="text-center py-5">
+        <div style="font-size:3.5rem">🛒</div>
+        <h5 class="text-muted mt-2">Your cart is empty</h5>
+        <p class="text-muted" style="font-size:.875rem">Add some delicious food to get started!</p>
+      </div>`;
+      updateCartCounter(0);
+      return;
+    }
+
+    let html = '<div class="d-flex flex-column gap-2 mb-3">';
+    items.forEach(it => {
+      html += `<div class="cart-item" data-product-id="${it.product_id}">
+        <div class="d-flex align-items-center gap-3">
+          <img src="${it.image}" alt="${escapeHtml(it.name)}" class="cart-item-img" 
+               onerror="this.onerror=null;this.src='<?=IMG_PLACEHOLDER?>';"/>
+          <div class="flex-grow-1" style="min-width:0">
+            <strong style="font-size:.875rem;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(it.name)}</strong>
+            <small class="text-muted">₱${Number(it.price).toFixed(2)} each</small>
+            <div class="d-flex align-items-center gap-1 mt-1">
+              <button class="btn btn-sm btn-outline-secondary qty-btn" onclick="updateQuantity(${it.product_id},-1)"><i class="bi bi-dash"></i></button>
+              <span class="qty-display mx-2 fw-bold" id="qty-${it.product_id}">${it.quantity}</span>
+              <button class="btn btn-sm btn-outline-secondary qty-btn" onclick="updateQuantity(${it.product_id},1)"><i class="bi bi-plus"></i></button>
+              <button class="btn btn-sm btn-outline-danger ms-2 qty-btn" onclick="removeFromCart(${it.product_id})"><i class="bi bi-trash"></i></button>
+            </div>
+          </div>
+          <div class="text-end" style="flex-shrink:0">
+            <strong style="color:var(--primary)">₱${(it.price*it.quantity).toFixed(2)}</strong>
+          </div>
+        </div>
+      </div>`;
+    });
+
+    html += '</div><hr class="my-2"/>';
+    html += `<div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="mb-0 fw-bold">Total:</h6>
+      <h5 class="mb-0 fw-bold" style="color:var(--primary)" id="cartTotal">₱${Number(data.total).toFixed(2)}</h5>
+    </div>
+    <button class="btn btn-success w-100" onclick="proceedToCheckout()">
+      <i class="bi bi-credit-card me-1"></i>Proceed to Checkout
+    </button>`;
+
+    body.innerHTML = html;
+    updateCartCounter(data.cart_count || 0);
+
+  } catch (err) {
+    console.error('fetchCartAndRender error', err);
+    body.innerHTML = '<div class="text-center py-4 text-danger">Network error — please try again.</div>';
+  }
+}
+
+function escapeHtml(s) { 
+  return String(s).replace(/[&"'<>]/g, c => ({'&':'&amp;','"':'&quot;',"'":'&#39;','<':'&lt;','>':'&gt;'}[c])); 
+}
+
+async function openCartModal() {
+  const modalEl = document.getElementById('cartModal');
+  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+  modal.show();
+  await fetchCartAndRender();
+}
+
+async function proceedToCheckout() {
+  const cartModalEl     = document.getElementById('cartModal');
+  const checkoutModalEl = document.getElementById('checkoutModal');
+  
+  await fetchCartAndRender();
+  
+  const cartModal = bootstrap.Modal.getInstance(cartModalEl);
+  if (cartModal) {
+    cartModalEl.addEventListener('hidden.bs.modal', function handler() {
+      cartModalEl.removeEventListener('hidden.bs.modal', handler);
+      bootstrap.Modal.getOrCreateInstance(checkoutModalEl).show();
+    });
+    cartModal.hide();
+  } else {
+    bootstrap.Modal.getOrCreateInstance(checkoutModalEl).show();
+  }
 }
 
 function updateQuantity(productId, change) {
   const qtyEl = document.getElementById(`qty-${productId}`);
+  if (!qtyEl) return;
   let qty = parseInt(qtyEl.textContent) + change;
   if (qty < 1) qty = 1;
   qtyEl.textContent = qty;
@@ -676,7 +917,9 @@ function updateQuantity(productId, change) {
 }
 
 function removeFromCart(productId) {
-  if (confirm('Remove this item from your cart?')) updateCartItem(productId, 0);
+  if (confirm('Remove this item from your cart?')) {
+    updateCartItem(productId, 0);
+  }
 }
 
 function updateCartItem(productId, quantity) {
@@ -691,11 +934,14 @@ function updateCartItem(productId, quantity) {
       updateCartCounter(data.cart_count);
       const ct = document.getElementById('cartTotal');
       if (ct) ct.textContent = '₱' + parseFloat(data.total).toLocaleString('en-PH', {minimumFractionDigits:2});
+      
       if (quantity === 0) {
         document.querySelector(`.cart-item[data-product-id="${productId}"]`)?.remove();
-        if (!document.querySelectorAll('.cart-item').length) location.reload();
+        if (!document.querySelectorAll('.cart-item').length) {
+          fetchCartAndRender();
+        }
       }
-      showToast(data.message, 'success');
+      showToast(data.message || 'Cart updated', 'success');
     } else {
       showToast(data.message || 'Failed to update cart', 'danger');
     }
@@ -705,8 +951,10 @@ function updateCartItem(productId, quantity) {
 
 function updateCartCounter(count) {
   const c = document.getElementById('cartCounter');
-  c.textContent   = count > 0 ? count : '';
-  c.style.display = count > 0 ? 'flex' : 'none';
+  if (c) {
+    c.textContent   = count > 0 ? count : '';
+    c.style.display = count > 0 ? 'flex' : 'none';
+  }
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -734,12 +982,13 @@ function showToast(message, type = 'info') {
 
 // ── Checkout validation ───────────────────────────────────────────────────────
 function validateCheckout() {
-  const total = <?=$total?>;
+  const total = <?=json_encode((float)$total)?>;
   const cash  = parseFloat(document.getElementById('cash_amount')?.value) || 0;
   const btn   = document.getElementById('checkoutButton');
   const prev  = document.getElementById('changePreview');
   const chAmt = document.getElementById('changeAmt');
   const valid = cash >= total && cash > 0 && total > 0;
+  
   if (btn) btn.disabled = !valid;
   if (valid && prev && chAmt) {
     prev.style.display = 'block';
@@ -749,9 +998,7 @@ function validateCheckout() {
   }
 }
 
-// ── Favourites (shared between card + hover preview) ─────────────────────────
-// Both the small .fav-btn-sm and the .btn-hp-fav carry data-pid.
-// syncFav keeps both in sync when one is clicked.
+// ── Favourites ────────────────────────────────────────────────────────────────
 function toggleFavorite(productId, btn) {
   const favorited = btn.classList.contains('favorited');
   _applyFav(productId, !favorited);
@@ -772,7 +1019,6 @@ function _applyFav(productId, add) {
   const countEl = document.getElementById('favCount');
   if (countEl) countEl.textContent = favs.length;
 
-  // Sync ALL buttons (card + hover preview) for this product
   document.querySelectorAll(`[data-pid="${productId}"]`).forEach(el => {
     el.classList.toggle('favorited', add);
   });
@@ -798,14 +1044,75 @@ function filterMenu(query) {
   document.getElementById('emptySearch').style.display = anyVisible ? 'none' : 'block';
 }
 
-// ── DOMContentLoaded ──────────────────────────────────────────────────────────
+// ── Add to Cart Handlers ──────────────────────────────────────────────────────
+function attachAddToCartHandlers() {
+  const forms = document.querySelectorAll('form');
+  forms.forEach(form => {
+    const addBtn = form.querySelector('button[name="add_to_cart"]');
+    if (!addBtn) return;
+
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+
+      const submitBtn = form.querySelector('button[name="add_to_cart"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+      }
+
+      try {
+        const fd = new FormData(form);
+        fd.append('add_to_cart', '1');
+        fd.append('ajax', '1');
+
+        const response = await fetch(window.location.href, {
+          method: 'POST',
+          body: fd
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          updateCartCounter(data.cart_count || 0);
+          await fetchCartAndRender();
+          showToast(data.message || 'Added to cart!', 'success');
+        } else {
+          showToast(data.message || 'Failed to add item', 'danger');
+        }
+      } catch (error) {
+        console.error('Add to cart error:', error);
+        showToast('Network error. Please try again.', 'danger');
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="bi bi-cart-plus"></i> Add';
+        }
+      }
+    });
+  });
+}
+
+// ── Initialize ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
+  attachAddToCartHandlers();
 
-  // Checkout validation
+  // Cleanup old modals
+  ['cartModal','checkoutModal'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { 
+      const ex = bootstrap.Modal.getInstance(el); 
+      if (ex) ex.dispose(); 
+    }
+  });
+
+  // Cash amount validation
   const cashField = document.getElementById('cash_amount');
-  if (cashField) { cashField.addEventListener('input', validateCheckout); validateCheckout(); }
+  if (cashField) {
+    cashField.addEventListener('input', validateCheckout);
+    cashField.addEventListener('change', validateCheckout);
+  }
 
-  // Restore favourites from localStorage
+  // Load favorites
   const favs = JSON.parse(localStorage.getItem('fh_favorites') || '[]');
   const countEl = document.getElementById('favCount');
   if (countEl) countEl.textContent = favs.length;
@@ -813,53 +1120,18 @@ document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll(`[data-pid="${id}"]`).forEach(el => el.classList.add('favorited'));
   });
 
-  // Category pill active-state via IntersectionObserver
-  const sections = document.querySelectorAll('.menu-section');
-  const pills    = document.querySelectorAll('.cat-pill');
-  const observer = new IntersectionObserver(entries => {
-    entries.forEach(e => {
-      if (e.isIntersecting) {
-        pills.forEach(p => p.classList.remove('active'));
-        document.querySelector(`.cat-pill[data-cat="${e.target.id}"]`)?.classList.add('active');
-      }
-    });
-  }, {threshold: .3});
-  sections.forEach(s => observer.observe(s));
+  <?php if ($checkoutError): ?>
+  setTimeout(() => bootstrap.Modal.getOrCreateInstance(document.getElementById('checkoutModal')).show(), 300);
+  <?php endif; ?>
 
-  // Category pill click highlight
-  pills.forEach(pill => {
-    pill.addEventListener('click', function () {
-      pills.forEach(p => p.classList.remove('active'));
-      this.classList.add('active');
-    });
-  });
-
-  // Hover preview: flip left when card is in last 2 columns of the row
-  // and flip down when near the top of viewport
-  function positionPreviews() {
-    document.querySelectorAll('.dish-card').forEach(card => {
-      const rect  = card.getBoundingClientRect();
-      const vpW   = window.innerWidth;
-      const vpH   = window.innerHeight;
-
-      // If not enough space on the right → flip left
-      card.classList.toggle('flip-left',  rect.right + 230 > vpW);
-      // If card is in the upper 30% of viewport → flip down
-      card.classList.toggle('flip-down',  rect.top < vpH * 0.30);
-    });
-  }
-
-  positionPreviews();
-  window.addEventListener('resize', positionPreviews);
-  document.addEventListener('scroll', positionPreviews, {passive: true});
-});
-
-// ── Scroll restore ────────────────────────────────────────────────────────────
-(function () {
+  // Scroll position restore
   const s = sessionStorage.getItem('fhScroll');
-  if (s) { window.scrollTo(0, parseInt(s, 10)); sessionStorage.removeItem('fhScroll'); }
-})();
-window.addEventListener('beforeunload', () => sessionStorage.setItem('fhScroll', window.scrollY));
+  if (s) { 
+    window.scrollTo(0, parseInt(s, 10)); 
+    sessionStorage.removeItem('fhScroll'); 
+  }
+  window.addEventListener('beforeunload', () => sessionStorage.setItem('fhScroll', window.scrollY));
+});
 </script>
 </body>
-</html>
+</html>  
