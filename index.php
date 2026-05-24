@@ -105,25 +105,7 @@ function getProductImage($product) {
     </nav>
 
     <div class="container mt-5">
-        <div class="hero p-5 mb-4">
-            <div class="row align-items-center">
-                <div class="col-md-7">
-                    <h1 class="display-4">Kain at Kainan. Eat-In Ordering Made Easy PH</h1>
-                    <p class="lead">Discover authentic Filipino meals for your karenderia dining experience. Order, eat in, and savor local favorites with zero delivery process.</p>
-                    <?php if (!isset($_SESSION['user_id'])): ?>
-                        <button class="btn btn-primary btn-lg me-2" data-bs-toggle="modal" data-bs-target="#signupModal"><i class="bi bi-person-plus"></i> Get Started</button>
-                        <button class="btn btn-outline-primary btn-lg" data-bs-toggle="modal" data-bs-target="#signinModal"><i class="bi bi-box-arrow-in-right"></i> Sign In</button>
-                    <?php else: ?>
-                        <a class="btn btn-primary btn-lg" href="<?php echo $_SESSION['role'] == 'admin' ? 'public/admin/dashboard.php' : 'public/user/dashboard.php'; ?>" role="button"><i class="bi bi-speedometer2"></i> Go to Dashboard</a>
-                    <?php endif; ?>
-                </div>
-                <div class="col-md-5 text-center">
-                    <img src="https://images.unsplash.com/photo-1565299624946-b28f40a0ca4b?auto=format&fit=crop&w=800&q=80" class="img-fluid rounded shadow" alt="Filipino food collage" loading="lazy">
-                </div>
-            </div>
-        </div>
-
-        <section id="why" class="row mt-5 fade-in">
+        <section id="why" class="row mt-2 fade-in">
             <div class="col-md-4">
                 <div class="card feature-card p-3">
                     <div class="card-body">
@@ -168,7 +150,7 @@ function getProductImage($product) {
                                 <p class="card-text"><?php echo nl2br(htmlspecialchars($product['description'])); ?></p>
                                 <div class="d-flex justify-content-between align-items-center">
                                     <span class="fs-5 fw-bold">₱<?php echo number_format($product['price'], 2); ?></span>
-                                    <a href="public/login.php" class="btn btn-sm btn-primary">Order</a>
+                                    <a href="public/user/dashboard.php" class="btn btn-sm btn-primary">Order</a>
                                 </div>
                             </div>
                         </div>
@@ -201,7 +183,7 @@ function getProductImage($product) {
                                                 <p class="card-text small text-muted"><?php echo htmlspecialchars(substr($meal['description'], 0, 60)) . '...'; ?></p>
                                                 <div class="d-flex justify-content-between align-items-center">
                                                     <span class="fw-bold text-primary">₱<?php echo number_format($meal['price'], 2); ?></span>
-                                                    <a href="public/login.php" class="btn btn-sm btn-outline-primary">Order</a>
+                                                    <a href="public/user/dashboard.php" class="btn btn-sm btn-outline-primary">Order</a>
                                                 </div>
                                             </div>
                                         </div>
@@ -228,7 +210,7 @@ function getProductImage($product) {
                                         <p class="card-text small"><?php echo htmlspecialchars($dessert['description']); ?></p>
                                         <div class="d-flex justify-content-between align-items-center">
                                             <span class="fw-bold text-success">₱<?php echo number_format($dessert['price'], 2); ?></span>
-                                            <a href="public/login.php" class="btn btn-sm btn-success">Order</a>
+                                            <a href="public/user/dashboard.php" class="btn btn-sm btn-success">Order</a>
                                         </div>
                                     </div>
                                 </div>

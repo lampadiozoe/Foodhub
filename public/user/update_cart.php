@@ -31,13 +31,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute();
             $stmt->close();
         } else {
-            // Validate product exists
+            // Validate product is available
             $stmt = $conn->prepare("SELECT stock FROM products WHERE id = ?");
             $stmt->bind_param("i", $product_id);
             $stmt->execute();
             $result = $stmt->get_result();
-            if (!$result->fetch_assoc()) {
+            $product = $result->fetch_assoc();
+            if (!$product) {
                 echo json_encode(['success' => false, 'message' => 'Product not found']);
+                exit;
+            }
+            if ((int)$product['stock'] <= 0) {
+                echo json_encode(['success' => false, 'message' => 'This item is currently unavailable.']);
                 exit;
             }
             $stmt->close();

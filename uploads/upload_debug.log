@@ -1,0 +1,45 @@
+[2026-05-23 03:38:08] upload_profile_image called
+[2026-05-23 03:38:08] Array
+(
+    [_SERVER] => Array
+        (
+            [REQUEST_METHOD] => POST
+            [HTTP_COOKIE] => PHPSESSID=4f2dc0614cb1e5d7ab9b81a7628831a8
+        )
+
+)
+
+[2026-05-23 03:38:08] Array
+(
+    [file_keys] => Array
+        (
+            [0] => name
+            [1] => full_path
+            [2] => type
+            [3] => tmp_name
+            [4] => error
+            [5] => size
+        )
+
+    [file_size] => 269728
+)
+
+[2026-05-23 03:38:08] Array
+(
+    [getimagesize] => Array
+        (
+            [0] => 420
+            [1] => 420
+            [2] => 3
+            [3] => width="420" height="420"
+            [bits] => 8
+            [mime] => image/png
+            [width_unit] => px
+            [height_unit] => px
+        )
+
+)
+
+[2026-05-23 03:38:08] moved file to C:\xampp\htdocs\Foodhub-1\public\user/../../uploads\profile_2_1779507488.png
+[2026-05-23 03:38:08] db update ok
+[2026-05-23 03:38:08] responding with url /uploads/profile_2_1779507488.png
